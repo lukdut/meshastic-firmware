@@ -25,6 +25,9 @@
 #include <nvs.h>
 #include <nvs_flash.h>
 
+static constexpr uint32_t REBOOT_COUNTER_SAVE_INTERVAL = 10;
+RTC_DATA_ATTR uint32_t rebootCounterRTC = 0;
+
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !MESHTASTIC_EXCLUDE_BLUETOOTH
 void setBluetoothEnable(bool enable)
 {
@@ -132,18 +135,29 @@ void esp32Setup()
     Preferences preferences;
     preferences.begin("meshtastic", false);
 
-    uint32_t rebootCounter = preferences.getUInt("rebootCounter", 0);
-    rebootCounter++;
-    preferences.putUInt("rebootCounter", rebootCounter);
+    uint32_t rebootCounterBase = preferences.getUInt("rebootCounter", 0);
+    rebootCounterRTC++;
+    uint32_t rebootCounter = rebootCounterBase + rebootCounterRTC;
+
+    bool needCommit = false;
     // store firmware version and hwrevision for access from OTA firmware
     String fwrev = preferences.getString("firmwareVersion", "");
-    if (fwrev.compareTo(optstr(APP_VERSION)) != 0)
+    if (fwrev.compareTo(optstr(APP_VERSION)) != 0) {
         preferences.putString("firmwareVersion", optstr(APP_VERSION));
+        needCommit = true;
+    }
     uint8_t hwven = preferences.getUInt("hwVendor", 0);
-    if (hwven != HW_VENDOR)
+    if (hwven != HW_VENDOR) {
         preferences.putUInt("hwVendor", HW_VENDOR);
+        needCommit = true;
+    }
+
+    if (rebootCounterRTC >= REBOOT_COUNTER_SAVE_INTERVAL || needCommit) {
+        preferences.putUInt("rebootCounter", rebootCounter);
+        rebootCounterRTC = 0;
+    }
     preferences.end();
-    LOG_DEBUG("Number of Device Reboots: %d", rebootCounter);
+    LOG_DEBUG("Number of Device Reboots: %u", rebootCounter);
 #if !MESHTASTIC_EXCLUDE_BLUETOOTH
     String BLEOTA = BleOta::getOtaAppVersion();
     if (BLEOTA.isEmpty()) {
